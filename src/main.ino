@@ -9,9 +9,9 @@
 
 using namespace std;
 
-const char *ssid = "ImmortalWrt";    // 连接WiFi名（此处使用taichi-maker为示例）
+const char *ssid = "Redmi_BA1A";    // 连接WiFi名（此处使用taichi-maker为示例）
                                      // 请将您需要连接的WiFi名填入引号中
-const char *password = "8877654321"; // 连接WiFi密码（此处使用12345678为示例）
+const char *password = "a521776A"; // 连接WiFi密码（此处使用12345678为示例）
 
 // extern lv_font_t my_font_name;
 LV_FONT_DECLARE(tencent_w7_22)
@@ -41,7 +41,10 @@ static lv_obj_t *cpu_value_label;
 static lv_obj_t *mem_bar;
 static lv_obj_t *mem_value_label;
 static lv_obj_t *temp_value_label;
+static lv_obj_t *temp_unit_label;
 static lv_obj_t *temperature_arc;
+static lv_obj_t *cpufreq_value_label;
+static lv_obj_t *packets_value_label;
 static lv_obj_t *ip_label;
 static lv_obj_t *up_time_label;
 static lv_style_t arc_indic_style;
@@ -62,13 +65,11 @@ static lv_style_t font_24;
 unsigned int bright = 220;
 bool autoLight = true;         // true:开启定时亮度 false:关闭定时亮度
 unsigned int nightLight = 256; //[0, 256] 越小越亮,越大越暗
-unsigned int nightHour = 23;
-unsigned int nightMin = 00;
-unsigned int nightSec = 00;
+unsigned int nightHour = 3;
+unsigned int nightMin = 30;
 unsigned int dayLight = bright; //[0, 256] 越小越亮,越大越暗
-unsigned int dayHour = 9;
-unsigned int dayMin = 0;
-unsigned int daySec = 0;
+unsigned int dayHour = 11;
+unsigned int dayMin = 30;
 
 NetChartData netChartData;
 
@@ -80,15 +81,18 @@ double down_speed;
 double cpu_usage;
 double mem_usage;
 double temp_value;
+double cpufreq;
+double packets;
+
 lv_coord_t upload_serise[10] = {0};
 lv_coord_t download_serise[10] = {0};
 string up_time;
 
-const auto net_name = "net.ovs_eth1";
-const auto mem_size = 7833960 / 1024.0;
+const auto net_name = "net.eth1";
+const auto mem_size = 1024.0;
 
 WiFiUDP ntpUDP;
-NTPClient timeClient(ntpUDP, "192.168.5.1", 28800);
+NTPClient timeClient(ntpUDP, "192.168.2.1", 28800);
 
 #if LV_USE_LOG != 0
 /* Serial debugging */
@@ -148,8 +152,7 @@ void setupPages()
 
 void autoLightCtl()
 {
-    // string s = "现在时间：" + to_string(hour()) + ":" + to_string(minute()) + ":" + to_string(second());
-    // Serial.print(s.c_str());
+    
     if (!autoLight)
     {
         return;
@@ -157,14 +160,16 @@ void autoLightCtl()
     int hour = timeClient.getHours();
     int minute = timeClient.getMinutes();
     int second = timeClient.getSeconds();
-
-    if ((hour == nightHour) && (minute == nightMin) && (second == nightSec))
+    
+    //string s = "现在时间：" + to_string(hour) + ":" + to_string(minute) + ":" + to_string(second);
+    //Serial.print(s.c_str());
+    if ((hour == nightHour) && (minute == nightMin))
     {
         setBrightness(nightLight);
         Serial.println("nightLight: ");
         Serial.println(nightLight);
     }
-    else if ((hour == dayHour) && (minute == dayMin) && (second == daySec))
+    else if ((hour == dayHour) && (minute == dayMin))
     {
         setBrightness(dayLight);
         Serial.println("dayLight: ");
@@ -322,12 +327,34 @@ void getNetworkSent()
 
 void getTemperature()
 {
-    if (getNetDataInfo("snmp_nas.temperature", netChartData))
+    if (getNetDataInfo("sensors.temp_thermal_zone0_thermal_thermal_zone0", netChartData))
     {
         Serial.print("Temperature: ");
         Serial.println(String(netChartData.max).c_str());
 
         temp_value = netChartData.max;
+    }
+}
+
+void getcpufreq()
+{
+    if (getNetDataInfo("cpu.cpufreq", netChartData))
+    {
+        Serial.print("cpufreq: ");
+        Serial.println(String(netChartData.max).c_str());
+
+        cpufreq = netChartData.max;
+    }
+}
+
+void getpackets()
+{
+    if (getNetDataInfoWithDimension("ipv4.packets", netChartData, "sent"))
+    {
+        Serial.print("packets: ");
+        Serial.println(String(netChartData.min).c_str());
+
+        packets = -1 * netChartData.min ;
     }
 }
 
@@ -439,12 +466,14 @@ static void task_cb(lv_task_t *task)
     getCPUUsage();
     getMemoryUsage();
     getTemperature();
+    getcpufreq();
+    getpackets();
     getNetworkReceived();
     getNetworkSent();
     updateChartRange();
     getUptime();
     lv_chart_refresh(chart);
-
+    autoLightCtl();
     updateNetworkInfoLabel();
 
     lv_bar_set_value(cpu_bar, cpu_usage, LV_ANIM_OFF);
@@ -457,12 +486,15 @@ static void task_cb(lv_task_t *task)
     lv_obj_set_pos(up_time_label, 10, 220);
     up_time.clear();
 
-    lv_label_set_text_fmt(temp_value_label, "%2.0f°C", temp_value);
-    uint16_t end_value = 120 + 300 * temp_value / 100.0f;
-    lv_color_t arc_color = temp_value > 75 ? lv_color_hex(0xff5d18) : lv_color_hex(0x50ff7d);
+    lv_label_set_text_fmt(temp_value_label, "%.2f", temp_value);
+    uint16_t end_value = 15 * temp_value  - 360;
+    lv_color_t arc_color = temp_value > 50 ? lv_color_hex(0xff5d18) : lv_color_hex(0x50ff7d);
     lv_style_set_line_color(&arc_indic_style, LV_STATE_DEFAULT, arc_color);
     lv_obj_add_style(temperature_arc, LV_ARC_PART_INDIC, &arc_indic_style);
     lv_arc_set_end_angle(temperature_arc, end_value);
+
+    lv_label_set_text_fmt(cpufreq_value_label, "%.2f", cpufreq);
+    lv_label_set_text_fmt(packets_value_label, "%.1f" ,packets);
     // 测试内存泄漏
     Serial.print("⚠ Left Memory:");
     Serial.println(ESP.getFreeHeap());
@@ -542,13 +574,13 @@ void setup()
     lv_label_set_text(upload_label, CUSTOM_SYMBOL_UPLOAD);
     lv_color_t speed_label_color = lv_color_hex(0x838a99);
     lv_obj_set_style_local_text_color(upload_label, LV_OBJ_PART_MAIN, LV_STATE_DEFAULT, LV_COLOR_RED);
-    lv_obj_set_pos(upload_label, 120, 18);
+    lv_obj_set_pos(upload_label, 130, 18);
 
     up_speed_label = lv_label_create(monitor_page, NULL);
     lv_label_set_text(up_speed_label, "56.78");
     lv_obj_add_style(up_speed_label, LV_LABEL_PART_MAIN, &font_18);
     lv_obj_set_style_local_text_color(up_speed_label, LV_OBJ_PART_MAIN, LV_STATE_DEFAULT, LV_COLOR_WHITE);
-    lv_obj_set_pos(up_speed_label, 143, 18);
+    lv_obj_set_pos(up_speed_label, 150, 18);
 
     up_speed_unit_label = lv_label_create(monitor_page, NULL);
     lv_label_set_text(up_speed_unit_label, "KB/S");
@@ -568,13 +600,13 @@ void setup()
     lv_label_set_text(down_speed_label, "12.34");
     lv_obj_add_style(down_speed_label, LV_LABEL_PART_MAIN, &font_18);
     lv_obj_set_style_local_text_color(down_speed_label, LV_OBJ_PART_MAIN, LV_STATE_DEFAULT, LV_COLOR_WHITE);
-    lv_obj_set_pos(down_speed_label, 33, 18);
+    lv_obj_set_pos(down_speed_label, 38, 18);
 
     down_speed_unit_label = lv_label_create(monitor_page, NULL);
     lv_obj_add_style(down_speed_unit_label, LV_LABEL_PART_MAIN, &font_16);
     lv_label_set_text(down_speed_unit_label, "MB/S");
     lv_obj_set_style_local_text_color(down_speed_unit_label, LV_OBJ_PART_MAIN, LV_STATE_DEFAULT, speed_label_color);
-    lv_obj_set_pos(down_speed_unit_label, 76, 18);
+    lv_obj_set_pos(down_speed_unit_label, 90, 18);
 
     // 绘制启动时间
 
@@ -609,10 +641,10 @@ void setup()
     lv_chart_refresh(chart); /*Required after direct set*/
 
     // 绘制进度条  CPU 占用
-    lv_obj_t *cpu_title = lv_label_create(monitor_page, NULL);
+   /*  lv_obj_t *cpu_title = lv_label_create(monitor_page, NULL);
     lv_label_set_text(cpu_title, "CPU");
     lv_obj_set_style_local_text_color(cpu_title, LV_OBJ_PART_MAIN, LV_STATE_DEFAULT, LV_COLOR_WHITE);
-    lv_obj_set_pos(cpu_title, 5, 140);
+    lv_obj_set_pos(cpu_title, 5, 140); */
 
     cpu_value_label = lv_label_create(monitor_page, NULL);
     lv_label_set_text(cpu_value_label, "34%");
@@ -638,10 +670,10 @@ void setup()
     lv_obj_set_style_local_radius(cpu_bar, LV_BAR_PART_INDIC, LV_STATE_DEFAULT, 0);
 
     // 绘制内存占用
-    lv_obj_t *men_title = lv_label_create(monitor_page, NULL);
+    /* lv_obj_t *men_title = lv_label_create(monitor_page, NULL);
     lv_label_set_text(men_title, "Memory");
     lv_obj_set_style_local_text_color(men_title, LV_OBJ_PART_MAIN, LV_STATE_DEFAULT, LV_COLOR_WHITE);
-    lv_obj_set_pos(men_title, 5, 180);
+    lv_obj_set_pos(men_title, 5, 180); */
 
     mem_value_label = lv_label_create(monitor_page, NULL);
     lv_label_set_text(mem_value_label, "42%");
@@ -690,10 +722,29 @@ void setup()
     // lv_obj_align(temperature_arc, NULL, LV_ALIGN_IN_BOTTOM_LEFT, 10, 10);
 
     temp_value_label = lv_label_create(monitor_page, NULL);
-    lv_label_set_text(temp_value_label, "72℃");
+    lv_label_set_text(temp_value_label, "72.00");
     lv_obj_add_style(temp_value_label, LV_LABEL_PART_MAIN, &font_24);
     lv_obj_set_style_local_text_color(temp_value_label, LV_OBJ_PART_MAIN, LV_STATE_DEFAULT, LV_COLOR_WHITE);
-    lv_obj_set_pos(temp_value_label, 160, 170);
+    lv_obj_set_pos(temp_value_label, 155, 170);
+
+    temp_unit_label = lv_label_create(monitor_page, NULL);
+    lv_obj_add_style(temp_unit_label, LV_LABEL_PART_MAIN, &font_22);
+    lv_label_set_text(temp_unit_label, "℃");
+    lv_obj_set_style_local_text_color(temp_unit_label, LV_OBJ_PART_MAIN, LV_STATE_DEFAULT, speed_label_color);
+    lv_obj_set_pos(temp_unit_label, 175, 195);
+
+    //绘制cpu频率
+    cpufreq_value_label = lv_label_create(monitor_page, NULL);
+    //lv_label_set_text(cpufreq_value_label, "72.00");
+    lv_obj_add_style(cpufreq_value_label, LV_LABEL_PART_MAIN, &font_18);
+    lv_obj_set_style_local_text_color(cpufreq_value_label, LV_OBJ_PART_MAIN, LV_STATE_DEFAULT, LV_COLOR_WHITE);
+    lv_obj_set_pos(cpufreq_value_label, 5, 135);
+
+    //绘制packets
+    packets_value_label = lv_label_create(monitor_page, NULL);
+    lv_obj_add_style(packets_value_label, LV_LABEL_PART_MAIN, &font_18);
+    lv_obj_set_style_local_text_color(packets_value_label, LV_OBJ_PART_MAIN, LV_STATE_DEFAULT, LV_COLOR_WHITE);
+    lv_obj_set_pos(packets_value_label, 5, 177);
 
     lv_task_t *t = lv_task_create(task_cb, 1000, LV_TASK_PRIO_MID, &test_data);
 
